@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"mime"
 	"net/http"
 	"os"
@@ -687,6 +686,10 @@ type Fs struct {
 	listRmu          *sync.Mutex         // protects listRempties
 	listRempties     map[string]struct{} // IDs of supposedly empty directories which triggered grouping disable
 	dirResourceKeys  *sync.Map           // map directory ID to resource key
+
+	// New fields for sequential service account handling
+    sortedSaFiles []string // List of sorted service account file paths
+    currentSaIndex int     // Current index in the sorted list of service account files
 	//------------------------------------------------------------
 	saFiles          map[string]int
 	doChangeSvc      *sync.Mutex
@@ -823,15 +826,30 @@ func (f *Fs) changeSvc(ctx context.Context) {
 		return
 	}
 	/**
-	 *  Select a random service account from the list
+	 *  Select the next service account in sequential order based on file names
 	 */
-	r := rand.Intn(len(f.saFiles))
-	for k := range f.saFiles {
-		if r == 0 {
-			opt.ServiceAccountFile = k
-		}
-		r--
-	}
+	 numFiles := len(f.saFiles)
+	 if numFiles == 0 {
+		 return // No service accounts available
+	 }
+ 
+	 // Initialize the sorted list and set the starting index if not already done
+	 if f.sortedSaFiles == nil || len(f.sortedSaFiles) == 0 {
+		 f.sortedSaFiles = make([]string, 0, numFiles)
+		 for filePath := range f.saFiles {
+			 f.sortedSaFiles = append(f.sortedSaFiles, filePath)
+		 }
+		 sort.Strings(f.sortedSaFiles) // Sort files alphabetically
+		 f.currentSaIndex = 0 // Start from the first file
+	 } else {
+		 // Move to the next file in the sorted list
+		 f.currentSaIndex = (f.currentSaIndex + 1) % numFiles
+	 }
+ 
+	 // Set the next service account file in sequential order
+	 opt.ServiceAccountFile = f.sortedSaFiles[f.currentSaIndex]
+	 fmt.Printf("Switched to service account file: %s\n", opt.ServiceAccountFile)
+
 	// Remove the service account from the list
 	delete(f.saFiles, opt.ServiceAccountFile)
 
